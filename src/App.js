@@ -957,7 +957,7 @@ function ComicStrip({ comic, archetype, p }) {
 const serif = "'Georgia','Times New Roman',serif";
 const sans  = "'Helvetica Neue',Arial,sans-serif";
 
-export default function MoodCrumbs() {
+export default function App() {
   // Pick today's 5 questions once on mount — same all day, different each day
   const [QUESTIONS]         = useState(() => pickDailyQuestions(QUESTION_POOL, 5));
   const dayCtx              = getDayContext();
