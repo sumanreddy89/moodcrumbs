@@ -984,7 +984,7 @@ export default function App() {
 
   const fetchCrumb = async (archetype, allAns) => {
     try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
@@ -1017,7 +1017,7 @@ const fetchComic = async () => {
     setLoadC(true);
     setErr("");
     try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
