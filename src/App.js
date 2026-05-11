@@ -1012,29 +1012,39 @@ Output ONLY valid JSON, no markdown:
     }
   };
 
-  const fetchComic = async () => {
+const fetchComic = async () => {
     if (!result) return;
     setLoadC(true);
+    setErr("");
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514",
-          max_tokens:500,
+          max_tokens:600,
           system:`Write a 3-panel comic for Mood Crumbs. Specific to the archetype AND their actual quiz answers. Painfully relatable, deadpan funny, GenZ. Each dialogue MAX 12 words. Captions 3-5 words.
 
-Output ONLY valid JSON:
-{"title":"lowercase ironic title, max 5 words","panel1":{"caption":"scene setter","dialogue":"opening line"},"panel2":{"caption":"escalation","dialogue":"chaotic middle"},"panel3":{"caption":"punchline","dialogue":"gut-punch closer"}}`,
+IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanation. Start with { and end with }.
+{"title":"lowercase ironic title max 5 words","panel1":{"caption":"scene setter","dialogue":"opening line"},"panel2":{"caption":"escalation","dialogue":"chaotic middle"},"panel3":{"caption":"punchline","dialogue":"gut-punch closer"}}`,
           messages:[{role:"user",content:
             `Archetype: ${result.archetype}\nVibe: ${result.vibe}\nDay energy: ${dayCtx}\n\nQuiz answers:\n${answers.map((a,i)=>`Q${i+1}: ${a.text}`).join("\n")}`
           }]
         })
       });
+      if (!r.ok) {
+        setErr(`API error ${r.status} — try again`);
+        setLoadC(false);
+        return;
+      }
       const d = await r.json();
-      setComic(JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim()));
-    } catch {
-      setErr("comic failed.");
+      const raw = d.content[0].text.trim().replace(/^```(?:json)?/,"").replace(/```$/,"").trim();
+      const parsed = JSON.parse(raw);
+      if (!parsed.panel1 || !parsed.panel2 || !parsed.panel3) throw new Error("bad shape");
+      setComic(parsed);
+    } catch(e) {
+      console.error("Comic error:", e);
+      setErr("comic failed — tap to retry");
     }
     setLoadC(false);
   };
