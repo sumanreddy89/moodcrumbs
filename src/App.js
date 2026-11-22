@@ -1,4 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+// The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
+// below and says so, instead of pretending a canned line is personal. Turn this back on only
+// with a server-side route that owns its prompts, model and token limits.
+export const AI_ENABLED = false;
+const AI_TIMEOUT_MS = 20000;
 
 /* ─────────────────────────────────────────────────────────────────────────────
    ARCHETYPE PALETTE
@@ -49,10 +55,100 @@ function seededRng(seed) {
   };
 }
 
-function pickDailyQuestions(pool, n = 5) {
-  const rng = seededRng(getDailySeed());
-  const shuffled = [...pool].sort(() => rng() - 0.5);
-  return shuffled.slice(0, n);
+// Fisher-Yates with the day's seed: every order is equally likely, and every browser gets
+// the same five questions on the same day (sorting with a random comparator gave neither).
+export function shuffleSeeded(list, seed) {
+  const rng = seededRng(seed);
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1)) % (i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+export function pickDailyQuestions(pool, n = 5, seed = getDailySeed()) {
+  return shuffleSeeded(pool, seed).slice(0, n);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   WRITTEN CRUMBS — used while the AI is off, and if it ever fails. Three per
+   archetype; the pick depends on your answers, so friends with the same
+   archetype don't all get the same line.
+─────────────────────────────────────────────────────────────────────────────*/
+export const WRITTEN_CRUMBS = {
+  "The Delulu Coquette": [
+    { crumb: "you've already named the kids. they haven't texted back since tuesday.", vibe: "ribbon-tied hope in a group chat" },
+    { crumb: "manifesting so hard the universe filed a restraining order.", vibe: "pink lip gloss and plausible deniability" },
+    { crumb: "read receipts off, delusions on, outfit planned for a date that doesn't exist.", vibe: "soft focus on a hard no" },
+  ],
+  "The Quiet Luxury Depressive": [
+    { crumb: "cashmere on the outside, voicemail full on the inside.", vibe: "beige silence in a nice apartment" },
+    { crumb: "you don't cry, you just reorganize the linen closet at 1am.", vibe: "unbranded sadness, excellent tailoring" },
+    { crumb: "everything you own is neutral. so is your answer to 'how are you'.", vibe: "old money energy, new money therapy" },
+  ],
+  "The Rizz Prophet": [
+    { crumb: "you could flirt with a parking ticket and get it waived.", vibe: "eye contact as a love language" },
+    { crumb: "your talking stage has a waitlist and a loyalty program.", vibe: "charm offensive in a black tee" },
+    { crumb: "you don't shoot your shot. the shot comes to you and apologises.", vibe: "unbothered gravity, slight smirk" },
+  ],
+  "The Hyperpop Healer": [
+    { crumb: "you heal your inner child with 140bpm and a crystal you can't name.", vibe: "glitter on a therapy notebook" },
+    { crumb: "emotionally stable at 2x speed, a mess at 0.5.", vibe: "sparkly sad in perfect sync" },
+    { crumb: "your coping mechanism has a playlist cover and a lore document.", vibe: "neon calm over static" },
+  ],
+  "The Situationship Soldier": [
+    { crumb: "you've survived four 'what are we's and zero answers. decorated veteran.", vibe: "camouflage feelings, open tabs" },
+    { crumb: "not dating, not single, just stationed somewhere in between.", vibe: "long tour in a grey area" },
+    { crumb: "you call it 'keeping it casual'. your camera roll calls it a documentary.", vibe: "loyal to the bit, not the person" },
+  ],
+  "The Productivity Spiral": [
+    { crumb: "you color-coded the to-do list instead of doing the to-do list.", vibe: "highlighter fumes and quiet panic" },
+    { crumb: "seven productivity apps, one unread email from 2023 haunting all of them.", vibe: "hustle aesthetic, nap reality" },
+    { crumb: "your rest day has a schedule and a KPI.", vibe: "burnout in a nice planner" },
+  ],
+  "The Main Character of a Side Plot": [
+    { crumb: "the soundtrack's playing, the camera's rolling, it's a tuesday at the pharmacy.", vibe: "cinematic about the mundane" },
+    { crumb: "you narrate your own life in third person and the reviews are mixed.", vibe: "indie film lighting, retail budget" },
+    { crumb: "everyone else is in their arc. you're in a montage that never ends.", vibe: "golden hour, wrong episode" },
+  ],
+  "The Trauma-Core Influencer": [
+    { crumb: "you turned your childhood into a carousel post with a link in bio.", vibe: "healing, monetised, aesthetic" },
+    { crumb: "vulnerable on main, unreachable in DMs.", vibe: "soft light on a hard story" },
+    { crumb: "you've processed it. you've also posted it. twice.", vibe: "story highlights titled 'growth'" },
+  ],
+  "The Bored Rich Kid With God Complex": [
+    { crumb: "you've never waited in line, but you've opinions on the line.", vibe: "trust fund ennui at golden hour" },
+    { crumb: "starting a podcast to share what you learned from a weekend in bali.", vibe: "unearned confidence, earned tan" },
+    { crumb: "you call it 'curating experiences'. the card statement calls it something else.", vibe: "yacht-adjacent existentialism" },
+  ],
+  "The Ex Who Always Wins": [
+    { crumb: "you didn't move on, you moved up, and you made sure they saw it.", vibe: "glow-up as a strategy" },
+    { crumb: "the breakup was mutual. the revenge body was not.", vibe: "calm surface, sharp edges" },
+    { crumb: "you post one blurry photo a month and ruin three people's week.", vibe: "unbothered on purpose" },
+  ],
+};
+
+// Same answers, same crumb; different answers usually get a different one.
+export function pickWrittenCrumb(archetype, answers) {
+  const options = WRITTEN_CRUMBS[archetype] || WRITTEN_CRUMBS["The Main Character of a Side Plot"];
+  const text = (answers || []).map((a) => (a && a.text) || "").join("|");
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) >>> 0;
+  return options[h % options.length];
+}
+
+async function fetchWithTimeout(url, options, signal) {
+  const timer = new AbortController();
+  const t = setTimeout(() => timer.abort(), AI_TIMEOUT_MS);
+  const onAbort = () => timer.abort();
+  if (signal) signal.addEventListener("abort", onAbort);
+  try {
+    return await fetch(url, { ...options, signal: timer.signal });
+  } finally {
+    clearTimeout(t);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
 }
 
 /* Day-of-week context injected into AI prompts for temporal relevance */
@@ -969,6 +1065,13 @@ export default function App() {
   const [comic, setComic]   = useState(null);
   const [loadC, setLoadC]   = useState(false);
   const [err, setErr]       = useState("");
+  // Each quiz run gets an id; a response from an earlier run is ignored, and reset cancels it.
+  const run = useRef({ id: 0, ctrl: null });
+  const newRun = () => {
+    if (run.current.ctrl) run.current.ctrl.abort();
+    run.current = { id: run.current.id + 1, ctrl: new AbortController() };
+    return run.current;
+  };
 
   const handleAnswer = async (opt) => {
     const next = [...answers, opt];
@@ -983,8 +1086,15 @@ export default function App() {
   };
 
   const fetchCrumb = async (archetype, allAns) => {
+    const mine = newRun();
+    const written = (reason) => {
+      if (mine.id !== run.current.id) return;
+      setResult({ archetype, ...pickWrittenCrumb(archetype, allAns), offline: reason });
+      setStep("result");
+    };
+    if (!AI_ENABLED) { written("off"); return; }
     try {
-      const r = await fetch("/api/claude", {
+      const r = await fetchWithTimeout("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
@@ -1000,24 +1110,26 @@ Output ONLY valid JSON, no markdown:
             `Archetype: ${archetype}\nDay energy: ${dayCtx}\n\nTheir answers:\n${allAns.map((a,i)=>`Q${i+1}: ${a.text}`).join("\n")}`
           }]
         })
-      });
+      }, mine.ctrl.signal);
+      if (!r.ok) throw new Error(`status ${r.status}`);
       const d = await r.json();
       const parsed = JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
+      if (mine.id !== run.current.id) return;
       setResult({ archetype, crumb: parsed.crumb, vibe: parsed.vibe });
       setStep("result");
     } catch {
-      // Fallback if API fails
-      setResult({ archetype, crumb:"you contain multitudes. some of them texting your ex.", vibe:"chaotic neutral in expensive lighting" });
-      setStep("result");
+      // Say so: a written crumb, labelled, rather than a canned line passed off as personal.
+      written("failed");
     }
   };
 
 const fetchComic = async () => {
-    if (!result) return;
+    if (!result || !AI_ENABLED) return;
+    const mine = run.current;
     setLoadC(true);
     setErr("");
     try {
-      const r = await fetch("/api/claude", {
+      const r = await fetchWithTimeout("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
@@ -1031,7 +1143,8 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
             `Archetype: ${result.archetype}\nVibe: ${result.vibe}\nDay energy: ${dayCtx}\n\nQuiz answers:\n${answers.map((a,i)=>`Q${i+1}: ${a.text}`).join("\n")}`
           }]
         })
-      });
+      }, mine.ctrl && mine.ctrl.signal);
+      if (mine.id !== run.current.id) return;
       if (!r.ok) {
         setErr(`API error ${r.status} — try again`);
         setLoadC(false);
@@ -1041,17 +1154,20 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
       const raw = d.content[0].text.trim().replace(/^```(?:json)?/,"").replace(/```$/,"").trim();
       const parsed = JSON.parse(raw);
       if (!parsed.panel1 || !parsed.panel2 || !parsed.panel3) throw new Error("bad shape");
+      if (mine.id !== run.current.id) return;
       setComic(parsed);
     } catch(e) {
+      if (mine.id !== run.current.id) return;
       console.error("Comic error:", e);
-      setErr("comic failed — tap to retry");
+      setErr(e && e.name === "AbortError" ? "the comic took too long — tap to retry" : "comic failed — tap to retry");
     }
-    setLoadC(false);
+    if (mine.id === run.current.id) setLoadC(false);
   };
 
   const reset = () => {
+    newRun();
     setStep("intro"); setAnswers([]); setQi(0);
-    setResult(null); setComic(null); setErr("");
+    setResult(null); setComic(null); setErr(""); setLoadC(false);
   };
 
   const p = result ? (PALETTE[result.archetype] || PALETTE[K.MC]) : {};
@@ -1150,10 +1266,22 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
               fontSize:16, color:p.accent, fontStyle:"italic",
               lineHeight:1.7, margin:0
             }}>"{result.crumb}"</p>
+            {result.offline && (
+              <p style={{fontSize:11.5, color:p.bar, margin:"10px 0 0", fontFamily:sans}}>
+                {result.offline === "off"
+                  ? "a written crumb · the AI is switched off for now"
+                  : "a written crumb · the AI didn't answer this time"}
+              </p>
+            )}
           </div>
 
           {/* Comic button or strip */}
-          {!comic && (
+          {!AI_ENABLED && (
+            <p style={{fontSize:13, color:"#9A8870", margin:"0 0 14px", fontFamily:sans}}>
+              comic strips are paused while the AI is off.
+            </p>
+          )}
+          {AI_ENABLED && !comic && (
             <button onClick={fetchComic} disabled={loadC} style={{
               background:p.accent, color:"#fff", border:"none",
               padding:"12px 28px", borderRadius:40, fontSize:14,
@@ -1165,6 +1293,7 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
             </button>
           )}
 
+          {AI_ENABLED && err && !comic && <p role="alert" style={{color:"#C47A7A", fontSize:13, margin:"0 0 12px"}}>{err}</p>}
           {comic && <ComicStrip comic={comic} archetype={result.archetype} p={p}/>}
 
           <p style={{
