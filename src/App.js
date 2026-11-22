@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { K, QUESTION_POOL, WRITTEN_CRUMBS, pickArchetype, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded } from "./quizEngine";
+import { useEffect, useRef, useState } from "react";
+import { K, QUESTION_POOL, WRITTEN_CRUMBS, dayLabel, getDailySeed, pickArchetype, pickDailyQuestions, pickDailySet, pickWrittenCrumb, shuffleSeeded } from "./quizEngine";
+import { clearHistory, entryFor, loadHistory, saveResult } from "./history";
 export { WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded };
 
 // The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
@@ -649,7 +650,16 @@ const sans  = "'Helvetica Neue',Arial,sans-serif";
 
 export default function App() {
   // Pick today's 5 questions once on mount — same all day, different each day
-  const [QUESTIONS]         = useState(() => pickDailyQuestions(QUESTION_POOL, 5));
+  // The quiz's day is fixed when a run starts: questions, seed and date label don't change
+  // mid-quiz even if the clock passes midnight UTC. "try again" starts a run on the current day.
+  const startDay = () => {
+    const seed = getDailySeed();
+    return { seed, label: dayLabel(seed), questions: pickDailySet(QUESTION_POOL, 5, seed).questions };
+  };
+  const [day, setDay]       = useState(startDay);
+  const QUESTIONS           = day.questions;
+  const [history, setHistory] = useState(() => loadHistory());
+  const today               = entryFor(history, getDailySeed());
   const dayCtx              = getDayContext();
 
   const [step, setStep]     = useState("intro");
@@ -674,16 +684,16 @@ export default function App() {
       setQi(qi + 1);
     } else {
       setStep("loading");
-      const archetype = pickArchetype(next);
-      await fetchCrumb(archetype, next);
+      const { archetype, attribution } = pickArchetype(next, day.seed);
+      await fetchCrumb(archetype, next, attribution);
     }
   };
 
-  const fetchCrumb = async (archetype, allAns) => {
+  const fetchCrumb = async (archetype, allAns, attribution = []) => {
     const mine = newRun();
     const written = (reason) => {
       if (mine.id !== run.current.id) return;
-      setResult({ archetype, ...pickWrittenCrumb(archetype, allAns), offline: reason });
+      setResult({ archetype, attribution, ...pickWrittenCrumb(archetype, allAns), offline: reason });
       setStep("result");
     };
     if (!AI_ENABLED) { written("off"); return; }
@@ -709,7 +719,7 @@ Output ONLY valid JSON, no markdown:
       const d = await r.json();
       const parsed = JSON.parse(d.content[0].text.trim().replace(/```json|```/g,"").trim());
       if (mine.id !== run.current.id) return;
-      setResult({ archetype, crumb: parsed.crumb, vibe: parsed.vibe });
+      setResult({ archetype, attribution, crumb: parsed.crumb, vibe: parsed.vibe });
       setStep("result");
     } catch {
       // Say so: a written crumb, labelled, rather than a canned line passed off as personal.
@@ -760,8 +770,23 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
 
   const reset = () => {
     newRun();
+    setDay(startDay());
     setStep("intro"); setAnswers([]); setQi(0);
     setResult(null); setComic(null); setErr(""); setLoadC(false);
+  };
+
+  // Keep today's result in this browser's history (a same-day retake replaces it).
+  useEffect(() => {
+    if (step !== "result" || !result || result.fromHistory) return;
+    setHistory(saveResult({ seed: day.seed, archetype: result.archetype, crumb: result.crumb, vibe: result.vibe,
+      attribution: result.attribution || [], answers: answers.map((a) => a.text), offline: result.offline || null }));
+  }, [step, result]); // only when a new result appears
+
+  const showSaved = (entry) => {
+    setResult({ archetype: entry.archetype, crumb: entry.crumb, vibe: entry.vibe, attribution: entry.attribution || [],
+      offline: entry.offline, fromHistory: true });
+    setDay((d) => ({ ...d, seed: entry.seed, label: dayLabel(entry.seed) }));
+    setStep("result");
   };
 
   const p = result ? (PALETTE[result.archetype] || PALETTE[K.MC]) : {};
@@ -786,13 +811,50 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
             5 questions. 1 archetype.<br/>no therapy. just the truth.
           </p>
           <p style={{color:"#B0A080", fontSize:11, margin:"0 0 4px", fontFamily:sans, letterSpacing:"0.04em"}}>
-            ↻ fresh questions every day · {new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'short'})}
+            ↻ fresh questions every day · {day.label} (UTC)
           </p>
           {err && <p style={{color:"#C47A7A", fontSize:13, margin:"12px 0 0"}}>{err}</p>}
-          <button onClick={()=>setStep("quiz")} style={{
-            marginTop:28, background:"#1C1A17", color:"#F5EFE0", border:"none",
-            padding:"13px 36px", borderRadius:40, fontSize:15, cursor:"pointer", fontFamily:serif
-          }}>find out who you are →</button>
+          {today ? (
+            <div style={{marginTop:24}}>
+              <p style={{fontSize:15, color:"#2C2820", margin:"0 0 12px"}}>
+                you're already {today.archetype.replace(/^The /, "").toLowerCase()} today. come back tomorrow.
+              </p>
+              <div style={{width:120, margin:"0 auto 14px"}}><PolaroidCard archetype={today.archetype} size={120}/></div>
+              <div style={{display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap"}}>
+                <button onClick={()=>showSaved(today)} style={{
+                  background:"#1C1A17", color:"#F5EFE0", border:"none", padding:"11px 24px",
+                  borderRadius:40, fontSize:14, cursor:"pointer", fontFamily:serif
+                }}>see my crumb →</button>
+                <button onClick={()=>setStep("quiz")} style={{
+                  background:"transparent", border:"1px solid #C4B498", borderRadius:40, padding:"11px 20px",
+                  fontSize:13, cursor:"pointer", fontFamily:serif, color:"#7A6850"
+                }}>take it again anyway</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={()=>setStep("quiz")} style={{
+              marginTop:28, background:"#1C1A17", color:"#F5EFE0", border:"none",
+              padding:"13px 36px", borderRadius:40, fontSize:15, cursor:"pointer", fontFamily:serif
+            }}>find out who you are →</button>
+          )}
+          {history.length > 0 && (
+            <div style={{marginTop:30, fontFamily:sans}}>
+              <p style={{fontSize:11, color:"#9A8870", textTransform:"uppercase", letterSpacing:"0.1em", margin:"0 0 8px"}}>your recent crumbs</p>
+              <div style={{display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap"}}>
+                {history.slice(0, 7).map((e) => (
+                  <button key={e.seed} onClick={()=>showSaved(e)} title={e.crumb} style={{
+                    background:"#fff", border:"1px solid #E0D4B8", borderRadius:20, padding:"4px 10px",
+                    fontSize:11.5, color:"#5A4A30", cursor:"pointer", fontFamily:sans
+                  }}>{dayLabel(e.seed).split(" ").slice(1).join(" ")} · {e.archetype.replace(/^The /, "")}</button>
+                ))}
+              </div>
+              <button onClick={()=>setHistory(clearHistory())} style={{
+                marginTop:10, background:"none", border:"none", color:"#9A8870", fontSize:11.5,
+                textDecoration:"underline", cursor:"pointer", fontFamily:sans
+              }}>clear my history</button>
+              <p style={{fontSize:10.5, color:"#B0A080", margin:"4px 0 0"}}>kept only in this browser</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -851,6 +913,13 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
             margin:"0 0 16px", fontFamily:sans, letterSpacing:"0.02em"
           }}>"{result.vibe}"</p>
 
+          {/* Why: the answers that pointed here */}
+          {result.attribution && result.attribution.length > 0 && (
+            <p style={{fontSize:13, color:"#7A6850", margin:"-6px 0 16px", lineHeight:1.6}}>
+              you said {result.attribution.slice(0, 2).map((t) => `"${t}"`).join(" and ")}. very {result.archetype.replace(/^The /, "").toLowerCase()} of you.
+            </p>
+          )}
+
           {/* Crumb card */}
           <div style={{
             background:p.bg, borderRadius:10, padding:"18px 22px",
@@ -894,6 +963,7 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
             fontSize:12, color:"#9A8870",
             margin:"4px 0 14px", fontStyle:"italic"
           }}>screenshot this. your ex will see it.</p>
+          <p style={{fontSize:11, color:"#B0A080", margin:"-8px 0 14px", fontFamily:sans}}>{day.label} (UTC)</p>
 
           <button onClick={reset} style={{
             background:"transparent", border:"1px solid #C4B498",

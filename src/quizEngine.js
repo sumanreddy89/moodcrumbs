@@ -21,9 +21,16 @@ export const K = {
    DATE SEED — deterministic daily shuffle
    Same 5 questions all day (consistent for sharing), fresh set each new day.
 ─────────────────────────────────────────────────────────────────────────────*/
-export function getDailySeed() {
-  const d = new Date();
-  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+// The day is a UTC day, so everyone gets the same questions at the same moment wherever they
+// are (local time gave friends in different time zones different quizzes).
+export function getDailySeed(date = new Date()) {
+  return date.getUTCFullYear() * 10000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate();
+}
+
+// "Sunday 22 Nov", for the UTC day a seed stands for.
+export function dayLabel(seed) {
+  const y = Math.floor(seed / 10000), m = Math.floor(seed / 100) % 100, d = seed % 100;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" });
 }
 
 export function seededRng(seed) {
@@ -46,8 +53,29 @@ export function shuffleSeeded(list, seed) {
   return out;
 }
 
-export function pickDailyQuestions(pool, n = 5, seed = getDailySeed()) {
-  return shuffleSeeded(pool, seed).slice(0, n);
+/* Daily questions, coverage-aware.
+   The day's seed shuffles the pool and the first n questions are the quiz. Some sets of five
+   make an archetype impossible to get, whatever you answer; a set like that is skipped and the
+   pool is reshuffled with retry seeds until every archetype can win. Retry k uses
+   seed * 1000 + k (not seed + k: seed + 1 is tomorrow's seed). Fully deterministic, so everyone
+   gets the same set on the same day. */
+export const MAX_RETRIES = 50;
+
+export function retrySeed(seed, k) {
+  return k === 0 ? seed : seed * 1000 + k;
+}
+
+export function pickDailySet(pool = QUESTION_POOL, n = 5, seed = getDailySeed()) {
+  for (let k = 0; k <= MAX_RETRIES; k++) {
+    const questions = shuffleSeeded(pool, retrySeed(seed, k)).slice(0, n);
+    if (coverage(questions, seed).unreachable.length === 0) return { questions, retry: k, seed };
+  }
+  // Not expected with the current pool; fall back to the plain shuffle rather than fail.
+  return { questions: shuffleSeeded(pool, seed).slice(0, n), retry: -1, seed };
+}
+
+export function pickDailyQuestions(pool = QUESTION_POOL, n = 5, seed = getDailySeed()) {
+  return pickDailySet(pool, n, seed).questions;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -404,16 +432,69 @@ export const QUESTION_POOL = [
 /* ─────────────────────────────────────────────────────────────────────────────
    DETERMINISTIC archetype picker
 ─────────────────────────────────────────────────────────────────────────────*/
-export function pickArchetype(answers) {
-  const scores = {};
-  Object.values(K).forEach(a => { scores[a] = 0; });
+/* Scoring and the tiebreak.
+   Each answer adds points to some archetypes; the highest total wins. About a quarter of answer
+   combinations tie at the top (answers give 3 or 1 points), so the tiebreak matters:
+     1. Spread: the archetype whose points came from the most different answers wins (a pattern
+        across your answers beats one big answer).
+     2. Recency: if still tied, the archetype your latest answer pointed to wins; if one answer
+        pointed to both, the one it gave more points.
+     3. Seed: a last resort if anything is still tied, so the result is always deterministic. With
+        the current questions it is never reached (see coverage().tiesSettledBySeed).
+   Before, ties silently went to whichever archetype came first in a list.
+   Returns { archetype, attribution, scores }: attribution is the answers that gave the winner
+   points, biggest first, for the "you said ..." line on the result screen. */
+export function pickArchetype(answers, seed = getDailySeed()) {
+  const archetypes = Object.values(K);
+  const scores = {}, from = {};
+  archetypes.forEach(a => { scores[a] = 0; from[a] = []; });
   answers.forEach(ans => {
-    Object.entries(ans.scores).forEach(([k,v]) => { scores[k] += v; });
+    Object.entries(ans.scores || {}).forEach(([k, v]) => {
+      if (!(k in scores) || !v) return;
+      scores[k] += v;
+      from[k].push({ text: ans.text, points: v });
+    });
   });
-  // Find max with deterministic tiebreaker (first in archetype key order)
-  let max = -1, winner = K.MC;
-  Object.values(K).forEach(a => {
-    if (scores[a] > max) { max = scores[a]; winner = a; }
-  });
-  return winner;
+  const max = Math.max(...archetypes.map(a => scores[a]));
+  let tied = archetypes.filter(a => scores[a] === max);
+  const narrow = (list, f) => { const m = Math.max(...list.map(f)); return list.filter(a => f(a) === m); };
+  if (tied.length > 1) tied = narrow(tied, a => from[a].length);
+  if (tied.length > 1) {
+    // Latest answer that gave the archetype points, then the points it gave.
+    const recency = a => { for (let j = answers.length - 1; j >= 0; j--) { const v = (answers[j].scores || {})[a]; if (v) return j * 100 + v; } return -1; };
+    tied = narrow(tied, recency);
+  }
+  const archetype = tied.length === 1 ? tied[0] : tied[Math.floor(seededRng(seed)() * tied.length) % tied.length];
+  const attribution = [...from[archetype]].sort((x, y) => y.points - x.points).map(x => x.text);
+  return { archetype, attribution, scores };
+}
+
+/* Coverage of a set of questions: try every combination of answers (4^5 = 1,024 for five
+   questions with four options) and report which archetypes can never win, how often the top
+   score is shared (ties), and how many ties are left for the seed after spread and recency. */
+export function coverage(questions, seed = 0) {
+  const wins = {};
+  Object.values(K).forEach(a => { wins[a] = 0; });
+  let combos = 0, ties = 0, tiesSettledBySeed = 0;
+  const walk = (i, picked) => {
+    if (i === questions.length) {
+      combos++;
+      const { archetype, scores } = pickArchetype(picked, seed);
+      wins[archetype]++;
+      const max = Math.max(...Object.values(scores));
+      const top = Object.keys(scores).filter(a => scores[a] === max);
+      if (top.length > 1) {
+        ties++;
+        const narrow = (list, f) => { const m = Math.max(...list.map(f)); return list.filter(a => f(a) === m); };
+        const spread = narrow(top, a => picked.filter(p => (p.scores || {})[a]).length);
+        const recency = a => { for (let j = picked.length - 1; j >= 0; j--) { const v = (picked[j].scores || {})[a]; if (v) return j * 100 + v; } return -1; };
+        if (spread.length > 1 && narrow(spread, recency).length > 1) tiesSettledBySeed++;
+      }
+      return;
+    }
+    for (const opt of questions[i].options) walk(i + 1, [...picked, opt]);
+  };
+  walk(0, []);
+  const unreachable = Object.keys(wins).filter(a => wins[a] === 0);
+  return { combos, wins, unreachable, ties, tiesSettledBySeed };
 }

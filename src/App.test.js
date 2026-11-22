@@ -3,9 +3,9 @@ import App, { AI_ENABLED, WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, 
 
 test("the daily questions are the same for the same day and a fair shuffle", () => {
   const pool = Array.from({ length: 20 }, (_, i) => i);
-  expect(pickDailyQuestions(pool, 5, 20261122)).toEqual(pickDailyQuestions(pool, 5, 20261122));
-  expect(pickDailyQuestions(pool, 5, 20261122)).not.toEqual(pickDailyQuestions(pool, 5, 20261123));
   expect([...shuffleSeeded(pool, 7)].sort((a, b) => a - b)).toEqual(pool);
+  expect(pickDailyQuestions(undefined, 5, 20261122)).toEqual(pickDailyQuestions(undefined, 5, 20261122));
+  expect(pickDailyQuestions(undefined, 5, 20261122)).not.toEqual(pickDailyQuestions(undefined, 5, 20261123));
   // Fisher-Yates: each item lands first about equally often across many seeds.
   const firsts = new Array(4).fill(0);
   for (let seed = 1; seed <= 4000; seed++) firsts[shuffleSeeded([0, 1, 2, 3], seed)[0]] += 1;
@@ -35,5 +35,6 @@ test("with the AI off, the result says it's a written crumb and comics are pause
   }
   expect(await screen.findByText(/a written crumb · the AI is switched off/)).toBeInTheDocument();
   expect(screen.getByText(/comic strips are paused/)).toBeInTheDocument();
+  expect(screen.getByText(/^you said ".+"\. very .+ of you\.$|^you said ".+" and ".+"\. very .+ of you\.$/)).toBeInTheDocument();
   expect(global.fetch).not.toHaveBeenCalled();
 });
