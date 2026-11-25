@@ -5,6 +5,8 @@ import { clearHistory, entryFor, loadHistory, saveResult } from "./history";
 import { currentStreak, loadStreak, nextStreak, saveStreak } from "./streak";
 import { weekInCrumbs } from "./week";
 import { renderRecapCard, shareOrDownload } from "./recapCard";
+import { loadReturnState, recordQuiz, saveReturnState } from "./milestones";
+import { track } from "./track";
 export { WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded };
 
 // The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
@@ -870,7 +872,25 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
     setHistory(saveResult({ seed: day.seed, archetype: result.archetype, crumb: result.crumb, vibe: result.vibe,
       attribution: result.attribution || [], answers: answers.map((a) => a.text), offline: result.offline || null }));
     setStreak((s) => saveStreak(nextStreak(s, day.seed)));
+    // Anonymous counts (README, "What gets counted"). `history` here is from before this save.
+    track("quiz_done");
+    const { state, events } = recordQuiz(loadReturnState(), day.seed, history.some((e) => e.seed !== day.seed));
+    saveReturnState(state);
+    events.forEach((ev) => track(ev.e, ev.cohort));
   }, [step, result]); // only when a new result appears
+
+  useEffect(() => { if (step === "week") track("recap_viewed"); }, [step]);
+
+  // A visit from a shared recap card: count it once, then drop ?ref= so a reload doesn't recount.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has("ref")) return;
+      track("visit_from_ref");
+      url.searchParams.delete("ref");
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch { /* old browser: skip */ }
+  }, []);
 
   const showSaved = (entry) => {
     setResult({ archetype: entry.archetype, crumb: entry.crumb, vibe: entry.vibe, attribution: entry.attribution || [],
@@ -1090,7 +1110,7 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
           onBack={reset}
           onQuiz={today ? null : ()=>{ reset(); setStep("quiz"); }}
         >
-          <ShareWeek week={weekInCrumbs(history, todaySeed)}/>
+          <ShareWeek week={weekInCrumbs(history, todaySeed)} onShare={()=>track("share_clicked")}/>
         </WeekInCrumbs>
       )}
     </div>

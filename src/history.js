@@ -33,7 +33,7 @@ export function saveResult(entry, storage) {
 }
 
 // Everything this site keeps in the browser; "clear my history" removes all of it.
-export const LOCAL_KEYS = [HISTORY_KEY, "moodcrumbs.streak.v1"];
+export const LOCAL_KEYS = [HISTORY_KEY, "moodcrumbs.streak.v1", "moodcrumbs.return.v1"];
 
 export function clearHistory(storage) {
   const s = store(storage);
