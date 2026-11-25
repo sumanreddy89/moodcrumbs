@@ -23,7 +23,15 @@ The result screen says which answers pointed to your archetype ("you said ... ve
 
 ## Your history
 
-Your last 14 days of results are kept in this browser only (`localStorage`, key `moodcrumbs.history.v1`). If you've taken today's quiz, the start screen shows your crumb; "clear my history" removes it all. Nothing is sent anywhere and there are no accounts.
+Your last 14 days of results are kept in this browser only (`localStorage`, key `moodcrumbs.history.v1`). If you've taken today's quiz, the start screen shows your crumb; "clear my history" removes it all. Your results are never sent anywhere and there are no accounts (the anonymous counts below are separate).
+
+## Streak and week in crumbs
+
+Finishing the quiz on consecutive UTC days builds a streak ("Day 3"); missing a whole UTC day resets it. It's kept in this browser like the history (`moodcrumbs.streak.v1`). From Day 3, or any time from the start screen, "your week in crumbs" shows the last 7 days, the week's most frequent archetype and a share card (a 1080×1350 image linking to moodcrumbs.com).
+
+## What gets counted
+
+To learn whether people come back, the site counts a few events: `quiz_done`, `recap_viewed`, `share_clicked`, `visit_from_ref`, and once per browser `first_quiz`, `returned_2_days`, `returned_3_days` (or `existing_user`). Each one is a counter: the event name and a UTC day, nothing else. There is no ID, no cookie, and `api/ping.js` reads no IP address or user agent (Vercel's own request logs aside). The return milestones are worked out in your browser from your local history, and "clear my history" removes that state too. `node scripts/return-rate.js` prints the totals.
 
 ## AI
 
