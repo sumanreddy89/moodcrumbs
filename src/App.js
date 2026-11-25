@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { K, QUESTION_POOL, WRITTEN_CRUMBS, dayLabel, getDailySeed, pickArchetype, pickDailyQuestions, pickDailySet, pickWrittenCrumb, shuffleSeeded } from "./quizEngine";
 import { clearHistory, entryFor, loadHistory, saveResult } from "./history";
 import { currentStreak, loadStreak, nextStreak, saveStreak } from "./streak";
 import { weekInCrumbs } from "./week";
+import { renderRecapCard, shareOrDownload } from "./recapCard";
 export { WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded };
 
 // The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
@@ -650,6 +652,36 @@ function ComicStrip({ comic, archetype, p }) {
 const shortName = (a) => a.replace(/^The /, "");
 const shortDay = (seed) => dayLabel(seed).split(" ").slice(0, 2).map((w, i) => (i === 0 ? w.slice(0, 3) : w)).join(" ");
 
+const portraitSvg = (archetype) => {
+  const PC = PORTRAITS[archetype];
+  return PC ? renderToStaticMarkup(<PC/>) : "";
+};
+
+function ShareWeek({ week, onShare }) {
+  const [state, setState] = useState("idle");
+  if (!week.top) return null;
+  const share = async () => {
+    setState("working");
+    if (onShare) onShare();
+    try {
+      const outcome = await shareOrDownload(await renderRecapCard(week, portraitSvg));
+      setState(outcome === "downloaded" ? "downloaded" : "idle");
+    } catch {
+      setState("error");
+    }
+  };
+  return (
+    <div style={{marginBottom:14}}>
+      <button onClick={share} disabled={state === "working"} style={{
+        width:"100%", background:"#1C1A17", color:"#F5EFE0", border:"none", padding:"12px 24px",
+        borderRadius:40, fontSize:14, cursor: state === "working" ? "wait" : "pointer", fontFamily:serif
+      }}>{state === "working" ? "making your card..." : "share my week →"}</button>
+      {state === "downloaded" && <p style={{fontSize:12, color:"#7A6850", margin:"8px 0 0", fontFamily:sans}}>saved as an image. post it anywhere.</p>}
+      {state === "error" && <p role="alert" style={{fontSize:12, color:"#C47A7A", margin:"8px 0 0", fontFamily:sans}}>couldn't make the image. a screenshot works too.</p>}
+    </div>
+  );
+}
+
 function WeekInCrumbs({ week, onBack, onQuiz, children }) {
   const range = `${dayLabel(week.from).split(" ").slice(1).join(" ")} – ${dayLabel(week.to).split(" ").slice(1).join(" ")}`;
   return (
@@ -1057,7 +1089,9 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
           week={weekInCrumbs(history, todaySeed)}
           onBack={reset}
           onQuiz={today ? null : ()=>{ reset(); setStep("quiz"); }}
-        />
+        >
+          <ShareWeek week={weekInCrumbs(history, todaySeed)}/>
+        </WeekInCrumbs>
       )}
     </div>
   );
