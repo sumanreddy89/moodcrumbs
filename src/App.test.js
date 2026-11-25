@@ -54,3 +54,36 @@ test("the result shows Day 1, and a same-day retake keeps it at Day 1", async ()
   fireEvent.click(screen.getByText(/take it again anyway/));
   expect((await finish()).textContent).toBe("Day 1");
 });
+
+const finishQuiz = () => { for (let i = 0; i < 5; i++) fireEvent.click(screen.getAllByRole("button")[0]); };
+
+test("from Day 3 the result offers the week in crumbs: 7 days, blanks where no quiz", async () => {
+  window.localStorage.clear();
+  global.fetch = jest.fn();
+  const { getDailySeed } = require("./quizEngine");
+  const { addDays } = require("./streak");
+  const t = getDailySeed();
+  const past = [1, 2].map((n) => ({ seed: addDays(t, -n), archetype: "The Rizz Prophet", crumb: "old crumb", vibe: "v" }));
+  window.localStorage.setItem("moodcrumbs.history.v1", JSON.stringify(past));
+  render(<App />);
+  fireEvent.click(screen.getByText(/find out who you are/));
+  finishQuiz();
+  expect((await screen.findByTestId("streak")).textContent).toBe("Day 3 · in a row");
+  fireEvent.click(screen.getByText(/see your week in crumbs/));
+  const days = screen.getAllByTestId("week-day");
+  expect(days).toHaveLength(7);
+  expect(days.filter((d) => d.textContent.startsWith("–"))).toHaveLength(4);
+  expect(screen.getByText(/of 7 days/)).toBeInTheDocument();
+});
+
+test("on request, a week with no quizzes shows 7 blanks and no errors", () => {
+  window.localStorage.clear();
+  const { getDailySeed } = require("./quizEngine");
+  const { addDays } = require("./streak");
+  const old = [{ seed: addDays(getDailySeed(), -10), archetype: "The Rizz Prophet", crumb: "c", vibe: "v" }];
+  window.localStorage.setItem("moodcrumbs.history.v1", JSON.stringify(old));
+  render(<App />);
+  fireEvent.click(screen.getByText(/your week in crumbs/));
+  expect(screen.getAllByTestId("week-day").filter((d) => d.textContent.startsWith("–"))).toHaveLength(7);
+  expect(screen.getByText(/no crumbs this week yet/)).toBeInTheDocument();
+});

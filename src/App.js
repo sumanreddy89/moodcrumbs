@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { K, QUESTION_POOL, WRITTEN_CRUMBS, dayLabel, getDailySeed, pickArchetype, pickDailyQuestions, pickDailySet, pickWrittenCrumb, shuffleSeeded } from "./quizEngine";
 import { clearHistory, entryFor, loadHistory, saveResult } from "./history";
 import { currentStreak, loadStreak, nextStreak, saveStreak } from "./streak";
+import { weekInCrumbs } from "./week";
 export { WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded };
 
 // The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
@@ -644,6 +645,58 @@ function ComicStrip({ comic, archetype, p }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   WEEK IN CRUMBS — the last 7 UTC days, blanks for days without a quiz
+─────────────────────────────────────────────────────────────────────────────*/
+const shortName = (a) => a.replace(/^The /, "");
+const shortDay = (seed) => dayLabel(seed).split(" ").slice(0, 2).map((w, i) => (i === 0 ? w.slice(0, 3) : w)).join(" ");
+
+function WeekInCrumbs({ week, onBack, onQuiz, children }) {
+  const range = `${dayLabel(week.from).split(" ").slice(1).join(" ")} – ${dayLabel(week.to).split(" ").slice(1).join(" ")}`;
+  return (
+    <div style={{maxWidth:420, width:"100%", textAlign:"center"}}>
+      <h2 style={{fontSize:24, fontWeight:400, margin:"0 0 4px", color:"#1C1A17"}}>your week in crumbs</h2>
+      <p style={{fontSize:11, color:"#B0A080", margin:"0 0 22px", fontFamily:sans}}>{range} (UTC)</p>
+      <div style={{display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center", marginBottom:22}}>
+        {week.days.map(({ seed, entry }) => {
+          const PC = entry && PORTRAITS[entry.archetype];
+          return (
+            <div key={seed} data-testid="week-day" style={{width:72}}>
+              <div style={{width:72, height:83, overflow:"hidden", background: PC ? "#F5EFE0" : "transparent",
+                border: PC ? "2px solid #5A3818" : "1.5px dashed #D0C4A8", boxSizing:"border-box"}}>
+                {PC && <PC/>}
+              </div>
+              <p style={{fontSize:10, color:"#5A4A30", margin:"4px 0 0", fontFamily:sans, lineHeight:1.25, minHeight:25}}>
+                {entry ? shortName(entry.archetype) : "–"}
+              </p>
+              <p style={{fontSize:9.5, color:"#B0A080", margin:"2px 0 0", fontFamily:sans}}>{shortDay(seed)}</p>
+            </div>
+          );
+        })}
+      </div>
+      {week.top ? (
+        <div style={{background:"#fff", border:"1px solid #E0D4B8", borderRadius:10, padding:"16px 20px", marginBottom:18}}>
+          <p style={{fontSize:12, color:"#9A8870", margin:"0 0 6px", fontFamily:sans, textTransform:"uppercase", letterSpacing:"0.1em"}}>
+            mostly {shortName(week.top.archetype).toLowerCase()} · {week.top.count} of 7 days
+          </p>
+          <p style={{fontSize:15, color:"#3A2018", fontStyle:"italic", lineHeight:1.6, margin:0}}>"{week.top.crumb}"</p>
+        </div>
+      ) : (
+        <p style={{fontSize:14, color:"#7A6850", margin:"0 0 18px"}}>no crumbs this week yet.</p>
+      )}
+      {children}
+      <div style={{display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap"}}>
+        {onQuiz && (
+          <button onClick={onQuiz} style={{background:"#1C1A17", color:"#F5EFE0", border:"none", padding:"11px 24px",
+            borderRadius:40, fontSize:14, cursor:"pointer", fontFamily:serif}}>take today's quiz →</button>
+        )}
+        <button onClick={onBack} style={{background:"transparent", border:"1px solid #C4B498", borderRadius:40,
+          padding:"10px 22px", fontSize:13, cursor:"pointer", fontFamily:serif, color:"#7A6850"}}>back</button>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    MAIN APP
 ─────────────────────────────────────────────────────────────────────────────*/
 const serif = "'Georgia','Times New Roman',serif";
@@ -853,6 +906,12 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
                   }}>{dayLabel(e.seed).split(" ").slice(1).join(" ")} · {e.archetype.replace(/^The /, "")}</button>
                 ))}
               </div>
+              <div>
+                <button onClick={()=>setStep("week")} style={{
+                  marginTop:12, background:"none", border:"none", color:"#5A4A30", fontSize:12.5,
+                  cursor:"pointer", fontFamily:sans, textDecoration:"underline"
+                }}>your week in crumbs →</button>
+              </div>
               <button onClick={()=>{ setHistory(clearHistory()); setStreak(null); }} style={{
                 marginTop:10, background:"none", border:"none", color:"#9A8870", fontSize:11.5,
                 textDecoration:"underline", cursor:"pointer", fontFamily:sans
@@ -978,12 +1037,27 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
           }}>screenshot this. your ex will see it.</p>
           <p style={{fontSize:11, color:"#B0A080", margin:"-8px 0 14px", fontFamily:sans}}>{day.label} (UTC)</p>
 
+          {day.seed === todaySeed && streakNow >= 3 && (
+            <button onClick={()=>setStep("week")} style={{
+              display:"block", width:"100%", background:"#1C1A17", color:"#F5EFE0", border:"none",
+              padding:"12px 24px", borderRadius:40, fontSize:14, cursor:"pointer", fontFamily:serif, marginBottom:12
+            }}>see your week in crumbs →</button>
+          )}
+
           <button onClick={reset} style={{
             background:"transparent", border:"1px solid #C4B498",
             borderRadius:40, padding:"10px 22px", fontSize:13,
             cursor:"pointer", fontFamily:serif, color:"#7A6850"
           }}>try again →</button>
         </div>
+      )}
+
+      {step === "week" && (
+        <WeekInCrumbs
+          week={weekInCrumbs(history, todaySeed)}
+          onBack={reset}
+          onQuiz={today ? null : ()=>{ reset(); setStep("quiz"); }}
+        />
       )}
     </div>
   );
