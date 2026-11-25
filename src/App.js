@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { K, QUESTION_POOL, WRITTEN_CRUMBS, dayLabel, getDailySeed, pickArchetype, pickDailyQuestions, pickDailySet, pickWrittenCrumb, shuffleSeeded } from "./quizEngine";
 import { clearHistory, entryFor, loadHistory, saveResult } from "./history";
+import { currentStreak, loadStreak, nextStreak, saveStreak } from "./streak";
 export { WRITTEN_CRUMBS, pickDailyQuestions, pickWrittenCrumb, shuffleSeeded };
 
 // The AI route (api/claude.js) is switched off. While it is, the quiz uses the written crumbs
@@ -659,7 +660,10 @@ export default function App() {
   const [day, setDay]       = useState(startDay);
   const QUESTIONS           = day.questions;
   const [history, setHistory] = useState(() => loadHistory());
-  const today               = entryFor(history, getDailySeed());
+  const [streak, setStreak] = useState(() => loadStreak(loadHistory()));
+  const todaySeed           = getDailySeed();
+  const today               = entryFor(history, todaySeed);
+  const streakNow           = currentStreak(streak, todaySeed);
   const dayCtx              = getDayContext();
 
   const [step, setStep]     = useState("intro");
@@ -780,6 +784,7 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
     if (step !== "result" || !result || result.fromHistory) return;
     setHistory(saveResult({ seed: day.seed, archetype: result.archetype, crumb: result.crumb, vibe: result.vibe,
       attribution: result.attribution || [], answers: answers.map((a) => a.text), offline: result.offline || null }));
+    setStreak((s) => saveStreak(nextStreak(s, day.seed)));
   }, [step, result]); // only when a new result appears
 
   const showSaved = (entry) => {
@@ -848,7 +853,7 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
                   }}>{dayLabel(e.seed).split(" ").slice(1).join(" ")} · {e.archetype.replace(/^The /, "")}</button>
                 ))}
               </div>
-              <button onClick={()=>setHistory(clearHistory())} style={{
+              <button onClick={()=>{ setHistory(clearHistory()); setStreak(null); }} style={{
                 marginTop:10, background:"none", border:"none", color:"#9A8870", fontSize:11.5,
                 textDecoration:"underline", cursor:"pointer", fontFamily:sans
               }}>clear my history</button>
@@ -901,6 +906,14 @@ IMPORTANT: Output ONLY a raw JSON object. No markdown. No backticks. No explanat
 
       {step === "result" && result && (
         <div style={{maxWidth:420, width:"100%", textAlign:"center"}}>
+
+          {/* Streak: shown for today's result only */}
+          {day.seed === todaySeed && streakNow > 0 && (
+            <p data-testid="streak" style={{fontSize:12, color:"#7A6850", margin:"0 0 12px", fontFamily:sans,
+              textTransform:"uppercase", letterSpacing:"0.12em"}}>
+              <strong style={{color:"#1C1A17"}}>Day {streakNow}</strong>{streakNow > 1 ? " · in a row" : ""}
+            </p>
+          )}
 
           {/* Polaroid hero */}
           <div style={{marginBottom:20}}>

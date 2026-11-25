@@ -38,3 +38,19 @@ test("with the AI off, the result says it's a written crumb and comics are pause
   expect(screen.getByText(/^you said ".+"\. very .+ of you\.$|^you said ".+" and ".+"\. very .+ of you\.$/)).toBeInTheDocument();
   expect(global.fetch).not.toHaveBeenCalled();
 });
+
+test("the result shows Day 1, and a same-day retake keeps it at Day 1", async () => {
+  window.localStorage.clear();
+  global.fetch = jest.fn();
+  const finish = async () => {
+    for (let i = 0; i < 5; i++) fireEvent.click(screen.getAllByRole("button")[0]);
+    return screen.findByTestId("streak");
+  };
+  const { unmount } = render(<App />);
+  fireEvent.click(screen.getByText(/find out who you are/));
+  expect((await finish()).textContent).toBe("Day 1");
+  unmount();
+  render(<App />);
+  fireEvent.click(screen.getByText(/take it again anyway/));
+  expect((await finish()).textContent).toBe("Day 1");
+});
